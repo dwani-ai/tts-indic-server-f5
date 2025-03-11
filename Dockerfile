@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y \
     git \
     ffmpeg \
     sudo \
-    wget \
+    wget libvips\
     && ln -s /usr/bin/python3 /usr/bin/python \
     && rm -rf /var/lib/apt/lists/*
 
@@ -25,4 +25,4 @@ USER appuser
 EXPOSE 7860
 
 # Use absolute path for clarity
-CMD ["python", "/app/src/main.py", "--host", "0.0.0.0", "--port", "7860"]
+CMD ["python", "/app/src/server/main.py", "--host", "0.0.0.0", "--port", "7860"]
