@@ -27,7 +27,7 @@ from config.tts_config import SPEED, ResponseFormat, config as tts_config
 #from models.asr import ASRManager
 from models.gemma_llm import LLMManager
 from models.translate import TranslateManager
-from models.tts import TTSManager
+#from models.tts import TTSManager
 #from models.vlm import VLMManager
 
 from utils.auth import get_api_key, settings as auth_settings
@@ -88,7 +88,7 @@ app.state.limiter = limiter
 
 # Initialize model managers with lazy loading
 llm_manager = LLMManager(settings.llm_model_name)
-tts_manager = TTSManager()
+#tts_manager = TTSManager()
 #vlm_manager = VLMManager()
 #asr_manager = ASRManager()
 translate_manager_eng_indic = TranslateManager("eng_Latn", "kan_Knda")
@@ -183,7 +183,7 @@ async def unload_all_models(api_key: str = Depends(get_api_key)):
         # vlm_manager.unload()
         # asr_manager.unload()
         llm_manager.unload()
-        tts_manager.unload()
+        #tts_manager.unload()
         translate_manager_eng_indic.unload()
         translate_manager_indic_eng.unload()
         translate_manager_indic_indic.unload()
@@ -199,7 +199,7 @@ async def load_all_models(api_key: str = Depends(get_api_key)):
         logger.info("Starting to load all models...")
         #llm_manager.load()
         #tts_manager.load_model(tts_config.model)
-        tts_manager.load_model(tts_config.model, compile_mode="reduce-overhead")
+        #tts_manager.load_model(tts_config.model)
         #vlm_manager.load()
         #asr_manager.load()
         translate_manager_eng_indic.load()
@@ -212,6 +212,143 @@ async def load_all_models(api_key: str = Depends(get_api_key)):
         raise HTTPException(status_code=500, detail=f"Failed to load models: {str(e)}")
 
 
+from transformers import AutoModel
+import numpy as np
+import soundfile as sf
+
+
+# Load the IndicF5 model once at startup
+repo_id = "ai4bharat/IndicF5"
+model = AutoModel.from_pretrained(repo_id, trust_remote_code=True)
+
+import os  # Ensure this is imported at the top of your file
+
+class SpeechRequest(BaseModel):
+    text: str
+    ref_audio_path: str = "kannada_female_voice.wav"  # Default reference audio path
+    response_format: str = "mp3"
+
+    @classmethod
+    def validate_text(cls, v):
+        if not v.strip():
+            raise ValueError("Text cannot be empty")
+        if len(v) > 1000:
+            raise ValueError("Text cannot exceed 1000 characters")
+        return v.strip()
+
+    @classmethod
+    def validate_ref_audio_path(cls, v):
+        if not v.endswith(".wav"):
+            raise ValueError("Reference audio must be a WAV file")
+        if not os.path.exists(v):  # Fixed from io.os.path.exists to os.path.exists
+            raise ValueError(f"Reference audio file {v} not found")
+        return v
+
+# TTS generation endpoint
+@app.post("/v1/audio/speech_v2")
+async def generate_speech(request: SpeechRequest = Body(...)):
+    try:
+        # Generate speech using the IndicF5 model
+        audio = model(
+            request.text,
+            ref_audio_path=request.ref_audio_path,
+            ref_text="ರಾಮ ರಾಮಾಯಣದ ನಾಯಕ. ರಾಮನನ್ನು ದೇವರ ಅವತಾರವೆಂದು ಚಿತ್ರಿಸಲಾಗಿದೆ. ರಾಮನು ಅಯೋಧ್ಯೆಯ ಸೂರ್ಯ ವಂಶದ ರಾಜನಾದ ದಶರಥನ ಹಿರಿಯ ಮಗ"
+        )
+
+        # Normalize audio if necessary
+        if audio.dtype == np.int16:
+            audio = audio.astype(np.float32) / 32768.0
+        elif audio.dtype != np.float32:
+            audio = audio.astype(np.float32)
+
+        # Write audio to a temporary WAV buffer
+        wav_buffer = io.BytesIO()
+        sf.write(wav_buffer, np.array(audio, dtype=np.float32), samplerate=24000)
+        wav_buffer.seek(0)
+
+        # Convert WAV to MP3 using pydub
+        audio_segment = AudioSegment.from_wav(wav_buffer)
+        mp3_buffer = io.BytesIO()
+        audio_segment.export(mp3_buffer, format="mp3")
+        mp3_buffer.seek(0)
+
+        # Stream the MP3 response
+        headers = {
+            "Content-Disposition": "inline; filename=\"speech.mp3\"",
+            "Cache-Control": "no-cache",
+        }
+        return StreamingResponse(
+            mp3_buffer,
+            media_type="audio/mp3",
+            headers=headers
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Speech generation failed: {str(e)}")
+
+@app.post("/v1/audio/speech")
+@limiter.limit(settings.speech_rate_limit)
+async def generate_audio(
+    request: Request, 
+    speech_request: SpeechRequest = Body(...), 
+    api_key: str = Depends(get_api_key)
+):
+    if not speech_request.input.strip():
+        raise HTTPException(status_code=400, detail="Input cannot be empty")
+    
+    logger.info(f"Speech request: input={speech_request.input[:50]}..., voice={speech_request.voice}")
+    
+    try:
+        # Prepare the payload for the external API
+        payload = {
+            "input": speech_request.input,
+            "voice": speech_request.voice,
+            "model": speech_request.model,
+            "response_format": speech_request.response_format.value,
+            "speed": speech_request.speed
+        }
+        
+        # External API endpoint
+        external_url = "https://gaganyatri-tts-indic-server.hf.space/v1/audio/speech"
+        
+        # Send POST request to the external TTS API
+        response = requests.post(
+            external_url,
+            json=payload,
+            headers={
+                "accept": "application/json",
+                "Content-Type": "application/json"
+            },
+            stream=True  # Enable streaming to handle large audio responses efficiently
+        )
+        
+        # Check if the external API request was successful
+        if response.status_code != 200:
+            logger.error(f"External TTS API error: {response.status_code} - {response.text}")
+            raise HTTPException(
+                status_code=response.status_code, 
+                detail=f"External TTS API error: {response.text}"
+            )
+        
+        # Stream the audio response back to the client
+        headers = {
+            "Content-Disposition": f"inline; filename=\"speech.{speech_request.response_format.value}\"",
+            "Cache-Control": "no-cache",
+            "Content-Type": f"audio/{speech_request.response_format.value}"
+        }
+        
+        return StreamingResponse(
+            response.iter_content(chunk_size=8192),  # Stream in chunks
+            media_type=f"audio/{speech_request.response_format.value}",
+            headers=headers
+        )
+    
+    except Exception as e:
+        logger.error(f"Error generating audio via external API: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Audio generation failed: {str(e)}")
+
+
+'''
 @app.post("/v1/audio/speech")
 @limiter.limit(settings.speech_rate_limit)
 async def generate_audio(
@@ -238,7 +375,7 @@ async def generate_audio(
         logger.error(f"Error generating audio: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Audio generation failed: {str(e)}")
 
-
+'''
 @app.post("/v1/chat", response_model=ChatResponse)
 @limiter.limit(settings.chat_rate_limit)
 async def chat(request: Request, chat_request: ChatRequest, api_key: str = Depends(get_api_key)):
@@ -281,17 +418,20 @@ async def point_objects(file: UploadFile = File(...), object_type: str = "person
 
 '''
 @app.post("/v1/visual_query/")
-async def visual_query(image: UploadFile = File(...), query: str = Body(...)):
-    #image = Image.open(file.file)
-
+async def visual_query(file: UploadFile = File(...), query: str = Body(...)):
     try:
-        # Construct the message structure
+        # Open the uploaded file as a PIL Image
+        image = Image.open(file.file)
+        # Ensure the image is valid
+        if image.size == (0, 0):
+            raise HTTPException(status_code=400, detail="Uploaded image is empty or invalid")
+        
+        # Call vision_query with the PIL Image
         answer = await llm_manager.vision_query(image, query)
         return {"answer": answer}
     except Exception as e:
         logger.error(f"Error processing request: {str(e)}")
         raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
-
 
 @app.post("/v1/transcribe/", response_model=TranscriptionResponse)
 async def transcribe_audio(
