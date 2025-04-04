@@ -1,6 +1,5 @@
 transformers @ git+https://github.com/huggingface/transformers@v4.49.0-Gemma-3
 torch
-torchvision
 accelerate
 bitsandbytes
 pillow
@@ -25,3 +24,13 @@ torch
 parler_tts @ git+https://github.com/slabstech/parler-tts.git
 packaging  # Added to resolve flash-attn dependency
 flash-attn
+
+torchaudio
+onnx
+onnxruntime
+onnxruntime-gpu
+uvicorn
+fastapi
+pydub
+python-multipart
+hf_xet

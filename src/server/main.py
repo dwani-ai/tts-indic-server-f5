@@ -23,7 +23,6 @@ from tts_config import SPEED, ResponseFormat, config as tts_config
 from gemma_llm import LLMManager
 # from auth import get_api_key, settings as auth_settings
 
-
 import time
 from contextlib import asynccontextmanager
 from typing import Annotated, Any, OrderedDict, List
@@ -95,7 +94,6 @@ class TTSModelManager:
         if description_tokenizer.pad_token is None:
             description_tokenizer.pad_token = description_tokenizer.eos_token
 
-        
         # TODO - temporary disable -torch.compile 
         '''
         # Update model configuration
@@ -152,7 +150,6 @@ async def lifespan(_: FastAPI):
         tts_model_manager.get_or_load_model(config.model)
     yield
 
-#app = FastAPI(lifespan=lifespan)
 app = FastAPI(
     title="Dhwani API",
     description="AI Chat API supporting Indian languages",
@@ -160,7 +157,6 @@ app = FastAPI(
     redirect_slashes=False,
     lifespan=lifespan
 )
-
 
 def chunk_text(text, chunk_size):
     words = text.split()
@@ -197,7 +193,6 @@ async def generate_audio(
                                 padding="max_length",
                                 max_length=tts_model_manager.max_length).to(device)
         
-        # Use the tensor fields directly instead of BatchEncoding object
         input_ids = desc_inputs["input_ids"]
         attention_mask = desc_inputs["attention_mask"]
         prompt_input_ids = prompt_inputs["input_ids"]
@@ -323,14 +318,15 @@ async def generate_audio_batch(
 
     return StreamingResponse(in_memory_zip, media_type="application/zip")
 
-
 # Supported language codes
 SUPPORTED_LANGUAGES = {
     "asm_Beng", "kas_Arab", "pan_Guru", "ben_Beng", "kas_Deva", "san_Deva",
     "brx_Deva", "mai_Deva", "sat_Olck", "doi_Deva", "mal_Mlym", "snd_Arab",
     "eng_Latn", "mar_Deva", "snd_Deva", "gom_Deva", "mni_Beng", "tam_Taml",
     "guj_Gujr", "mni_Mtei", "tel_Telu", "hin_Deva", "npi_Deva", "urd_Arab",
-    "kan_Knda", "ory_Orya"
+    "kan_Knda", "ory_Orya",
+    "deu_Latn", "fra_Latn", "nld_Latn", "spa_Latn", "ita_Latn",
+    "por_Latn", "rus_Cyrl", "pol_Latn"
 }
 
 class Settings(BaseSettings):
@@ -351,7 +347,6 @@ class Settings(BaseSettings):
         env_file = ".env"
 
 settings = Settings()
-
 
 app.add_middleware(
     CORSMiddleware,
@@ -541,7 +536,7 @@ async def load_all_models():
         return {"status": "success", "message": "All models loaded"}
     except Exception as e:
         logger.error(f"Error loading models: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to load models: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to unload models: {str(e)}")
 
 @app.post("/v1/translate", response_model=TranslationResponse)
 async def translate_endpoint(request: TranslationRequest):
@@ -564,9 +559,11 @@ async def chat(request: Request, chat_request: ChatRequest):
     if not chat_request.prompt:
         raise HTTPException(status_code=400, detail="Prompt cannot be empty")
     logger.info(f"Received prompt: {chat_request.prompt}, src_lang: {chat_request.src_lang}, tgt_lang: {chat_request.tgt_lang}")
+    
+    EUROPEAN_LANGUAGES = {"deu_Latn", "fra_Latn", "nld_Latn", "spa_Latn", "ita_Latn", "por_Latn", "rus_Cyrl", "pol_Latn"}
+    
     try:
-        # Translate prompt to English if src_lang is not English
-        if chat_request.src_lang != "eng_Latn":
+        if chat_request.src_lang != "eng_Latn" and chat_request.src_lang not in EUROPEAN_LANGUAGES:
             translated_prompt = await perform_internal_translation(
                 sentences=[chat_request.prompt],
                 src_lang=chat_request.src_lang,
@@ -576,14 +573,12 @@ async def chat(request: Request, chat_request: ChatRequest):
             logger.info(f"Translated prompt to English: {prompt_to_process}")
         else:
             prompt_to_process = chat_request.prompt
-            logger.info("Prompt already in English, no translation needed")
+            logger.info("Prompt in English or European language, no translation needed")
 
-        # Generate response in English
         response = await llm_manager.generate(prompt_to_process, settings.max_tokens)
-        logger.info(f"Generated English response: {response}")
+        logger.info(f"Generated response: {response}")
 
-        # Translate response to target language if tgt_lang is not English
-        if chat_request.tgt_lang != "eng_Latn":
+        if chat_request.tgt_lang != "eng_Latn" and chat_request.tgt_lang not in EUROPEAN_LANGUAGES:
             translated_response = await perform_internal_translation(
                 sentences=[response],
                 src_lang="eng_Latn",
@@ -593,7 +588,7 @@ async def chat(request: Request, chat_request: ChatRequest):
             logger.info(f"Translated response to {chat_request.tgt_lang}: {final_response}")
         else:
             final_response = response
-            logger.info("Response kept in English, no translation needed")
+            logger.info(f"Response in {chat_request.tgt_lang}, no translation needed")
 
         return ChatResponse(response=final_response)
     except Exception as e:
@@ -612,7 +607,6 @@ async def visual_query(
         if image.size == (0, 0):
             raise HTTPException(status_code=400, detail="Uploaded image is empty or invalid")
 
-        # Translate query to English if src_lang is not English
         if src_lang != "eng_Latn":
             translated_query = await perform_internal_translation(
                 sentences=[query],
@@ -625,11 +619,9 @@ async def visual_query(
             query_to_process = query
             logger.info("Query already in English, no translation needed")
 
-        # Generate response in English
         answer = await llm_manager.vision_query(image, query_to_process)
         logger.info(f"Generated English answer: {answer}")
 
-        # Translate answer to target language if tgt_lang is not English
         if tgt_lang != "eng_Latn":
             translated_answer = await perform_internal_translation(
                 sentences=[answer],
@@ -670,7 +662,6 @@ async def chat_v2(
                 raise HTTPException(status_code=400, detail="Uploaded image is empty")
             img = Image.open(io.BytesIO(image_data))
 
-            # Translate prompt to English if src_lang is not English
             if src_lang != "eng_Latn":
                 translated_prompt = await perform_internal_translation(
                     sentences=[prompt],
@@ -686,7 +677,6 @@ async def chat_v2(
             decoded = await llm_manager.chat_v2(img, prompt_to_process)
             logger.info(f"Generated English response: {decoded}")
 
-            # Translate response to target language if tgt_lang is not English
             if tgt_lang != "eng_Latn":
                 translated_response = await perform_internal_translation(
                     sentences=[decoded],
@@ -699,7 +689,6 @@ async def chat_v2(
                 final_response = decoded
                 logger.info("Response kept in English, no translation needed")
         else:
-            # Translate prompt to English if src_lang is not English
             if src_lang != "eng_Latn":
                 translated_prompt = await perform_internal_translation(
                     sentences=[prompt],
@@ -715,7 +704,6 @@ async def chat_v2(
             decoded = await llm_manager.generate(prompt_to_process, settings.max_tokens)
             logger.info(f"Generated English response: {decoded}")
 
-            # Translate response to target language if tgt_lang is not English
             if tgt_lang != "eng_Latn":
                 translated_response = await perform_internal_translation(
                     sentences=[decoded],
@@ -733,9 +721,146 @@ async def chat_v2(
         logger.error(f"Error processing request: {str(e)}")
         raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
 
+class TranscriptionResponse(BaseModel):
+    text: str
+
+class ASRModelManager:
+    def __init__(self, device_type="cuda"):
+        self.device_type = device_type
+        self.model_language = {
+            "kannada": "kn", "hindi": "hi", "malayalam": "ml", "assamese": "as", "bengali": "bn",
+            "bodo": "brx", "dogri": "doi", "gujarati": "gu", "kashmiri": "ks", "konkani": "kok",
+            "maithili": "mai", "manipuri": "mni", "marathi": "mr", "nepali": "ne", "odia": "or",
+            "punjabi": "pa", "sanskrit": "sa", "santali": "sat", "sindhi": "sd", "tamil": "ta",
+            "telugu": "te", "urdu": "ur"
+        }
+
+from fastapi import FastAPI, UploadFile
+import torch
+import torchaudio
+from transformers import AutoModel
+import argparse
+import uvicorn
+from pydantic import BaseModel
+from pydub import AudioSegment
+from fastapi import FastAPI, File, UploadFile, HTTPException, Query
+from fastapi.responses import RedirectResponse, JSONResponse
+from typing import List
+
+# Load the model
+model = AutoModel.from_pretrained("ai4bharat/indic-conformer-600m-multilingual", trust_remote_code=True)
+
+asr_manager = ASRModelManager()
+
+# Language to script mapping
+LANGUAGE_TO_SCRIPT = {
+    "kannada": "kan_Knda", "hindi": "hin_Deva", "malayalam": "mal_Mlym", "tamil": "tam_Taml",
+    "telugu": "tel_Telu", "assamese": "asm_Beng", "bengali": "ben_Beng", "gujarati": "guj_Gujr",
+    "marathi": "mar_Deva", "odia": "ory_Orya", "punjabi": "pan_Guru", "urdu": "urd_Arab",
+    # Add more as needed
+}
+
+@app.post("/transcribe/", response_model=TranscriptionResponse)
+async def transcribe_audio(file: UploadFile = File(...), language: str = Query(..., enum=list(asr_manager.model_language.keys()))):
+    try:
+        wav, sr = torchaudio.load(file.file)
+        wav = torch.mean(wav, dim=0, keepdim=True)
+        target_sample_rate = 16000
+        if sr != target_sample_rate:
+            resampler = torchaudio.transforms.Resample(orig_freq=sr, new_freq=target_sample_rate)
+            wav = resampler(wav)
+        transcription_rnnt = model(wav, asr_manager.model_language[language], "rnnt")
+        return TranscriptionResponse(text=transcription_rnnt)
+    except Exception as e:
+        logger.error(f"Error in transcription: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
+@app.post("/v1/speech_to_speech")
+async def speech_to_speech(
+    request: Request,  # Inject Request object from FastAPI
+    file: UploadFile = File(...),
+    language: str = Query(..., enum=list(asr_manager.model_language.keys())),
+    voice: str = Body(default=config.voice)
+) -> StreamingResponse:
+    # Step 1: Transcribe audio to text
+    transcription = await transcribe_audio(file, language)
+    logger.info(f"Transcribed text: {transcription.text}")
+
+    # Step 2: Process text with chat endpoint
+    chat_request = ChatRequest(
+        prompt=transcription.text,
+        src_lang=LANGUAGE_TO_SCRIPT.get(language, "kan_Knda"),  # Dynamic script mapping
+        tgt_lang=LANGUAGE_TO_SCRIPT.get(language, "kan_Knda")
+    )
+    processed_text = await chat(request, chat_request)  # Pass the injected request
+    logger.info(f"Processed text: {processed_text.response}")
+
+    # Step 3: Convert processed text to speech
+    audio_response = await generate_audio(
+        input=processed_text.response,
+        voice=voice,
+        model=tts_config.model,
+        response_format=config.response_format,
+        speed=SPEED
+    )
+    return audio_response
+
+class BatchTranscriptionResponse(BaseModel):
+    transcriptions: List[str]
+
+import json
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run the FastAPI server.")
     parser.add_argument("--port", type=int, default=settings.port, help="Port to run the server on.")
     parser.add_argument("--host", type=str, default=settings.host, help="Host to run the server on.")
+    parser.add_argument("--config", type=str, default="config_one", help="Configuration to use (e.g., config_one, config_two, config_three, config_four)")
     args = parser.parse_args()
-    uvicorn.run(app, host=args.host, port=args.port)
+
+    # Load the JSON configuration file
+    def load_config(config_path="dhwani_config.json"):
+        with open(config_path, "r") as f:
+            return json.load(f)
+
+    config_data = load_config()
+    if args.config not in config_data["configs"]:
+        raise ValueError(f"Invalid config: {args.config}. Available: {list(config_data['configs'].keys())}")
+    
+    selected_config = config_data["configs"][args.config]
+    global_settings = config_data["global_settings"]
+
+    # Update settings based on selected config
+    settings.llm_model_name = selected_config["components"]["LLM"]["model"]
+    settings.max_tokens = selected_config["components"]["LLM"]["max_tokens"]
+    settings.host = global_settings["host"]
+    settings.port = global_settings["port"]
+    settings.chat_rate_limit = global_settings["chat_rate_limit"]
+    settings.speech_rate_limit = global_settings["speech_rate_limit"]
+
+    # Initialize LLMManager with the selected LLM model
+    llm_manager = LLMManager(settings.llm_model_name)
+
+    # Initialize ASR model if present in config
+    if selected_config["components"]["ASR"]:
+        asr_model_name = selected_config["components"]["ASR"]["model"]
+        model = AutoModel.from_pretrained(asr_model_name, trust_remote_code=True)
+        asr_manager.model_language[selected_config["language"]] = selected_config["components"]["ASR"]["language_code"]
+
+    # Initialize TTS model if present in config
+    if selected_config["components"]["TTS"]:
+        tts_model_name = selected_config["components"]["TTS"]["model"]
+        tts_config.model = tts_model_name  # Update tts_config to use the selected model
+        tts_model_manager.get_or_load_model(tts_model_name)
+
+    # Initialize Translation models - load all specified models
+    if selected_config["components"]["Translation"]:
+        for translation_config in selected_config["components"]["Translation"]:
+            src_lang = translation_config["src_lang"]
+            tgt_lang = translation_config["tgt_lang"]
+            model_manager.get_model(src_lang, tgt_lang)
+
+    # Override host and port from command line arguments if provided
+    host = args.host if args.host != settings.host else settings.host
+    port = args.port if args.port != settings.port else settings.port
+
+    # Run the server
+    uvicorn.run(app, host=host, port=port)
