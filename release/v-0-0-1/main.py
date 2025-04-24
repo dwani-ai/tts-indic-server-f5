@@ -26,6 +26,8 @@ from starlette.responses import StreamingResponse
 from logging_config import logger
 from tts_config import SPEED, ResponseFormat, config as tts_config
 import torchaudio
+import pytz
+from datetime import datetime
 
 # Device setup
 if torch.cuda.is_available():
@@ -76,6 +78,23 @@ quantization_config = BitsAndBytesConfig(
     bnb_4bit_use_double_quant=True,
     bnb_4bit_compute_dtype=torch.bfloat16
 )
+from num2words import num2words
+def time_to_words():
+    """Convert current IST time to words (e.g., '4:04' to 'four hours and four minutes', '4:00' to 'four o'clock')."""
+    ist = pytz.timezone('Asia/Kolkata')
+    now = datetime.now(ist)
+    hour = now.hour % 12 or 12  # Convert 24-hour to 12-hour format (0 -> 12)
+    minute = now.minute
+    
+    # Convert hour to words
+    hour_word = num2words(hour, to='cardinal')
+    
+    # Handle minutes
+    if minute == 0:
+        return f"{hour_word} o'clock"
+    else:
+        minute_word = num2words(minute, to='cardinal')
+        return f"{hour_word} hours and {minute_word} minutes"
 
 # LLM Manager
 class LLMManager:
@@ -119,10 +138,11 @@ class LLMManager:
         if not self.is_loaded:
             self.load()
 
+        current_time = time_to_words()
         messages_vlm = [
             {
                 "role": "system",
-                "content": [{"type": "text", "text": "You are Dhwani, a helpful assistant. Answer questions considering India as base country and Karnataka as base state. Provide a concise response in one sentence maximum."}]
+                "content": [{"type": "text", "text":  f"You are Dhwani, a helpful assistant. Answer questions considering India as base country and Karnataka as base state. Provide a concise response in one sentence maximum. If the answer contains numerical digits, convert the digits into words.   If user asks the time , then return answer as {current_time}"}]
             },
             {
                 "role": "user",

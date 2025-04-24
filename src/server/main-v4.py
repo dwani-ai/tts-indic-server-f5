@@ -26,28 +26,14 @@ from starlette.responses import StreamingResponse
 from logging_config import logger
 from tts_config import SPEED, ResponseFormat, config as tts_config
 import torchaudio
+from torch.cuda.amp import autocast
 
 # Device setup
-if torch.cuda.is_available():
-    device = "cuda:0"
-    logger.info("GPU will be used for inference")
-else:
-    device = "cpu"
-    logger.info("CPU will be used for inference")
-torch_dtype = torch.bfloat16 if device != "cpu" else torch.float32
-
-# Check CUDA availability and version
-cuda_available = torch.cuda.is_available()
-cuda_version = torch.version.cuda if cuda_available else None
-
-if torch.cuda.is_available():
-    device_idx = torch.cuda.current_device()
-    capability = torch.cuda.get_device_capability(device_idx)
-    compute_capability_float = float(f"{capability[0]}.{capability[1]}")
-    print(f"CUDA version: {cuda_version}")
-    print(f"CUDA Compute Capability: {compute_capability_float}")
-else:
-    print("CUDA is not available on this system.")
+device = "cuda:0"
+torch_dtype = torch.bfloat16
+logger.info(f"Using CUDA device: {torch.cuda.get_device_name(0)}")
+logger.info(f"CUDA Compute Capability: {torch.cuda.get_device_capability(0)[0]}.{torch.cuda.get_device_capability(0)[1]}")
+logger.info(f"CUDA Memory Available: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.2f} GB")
 
 # Settings
 class Settings(BaseSettings):
@@ -74,19 +60,20 @@ quantization_config = BitsAndBytesConfig(
     load_in_4bit=True,
     bnb_4bit_quant_type="nf4",
     bnb_4bit_use_double_quant=True,
-    bnb_4bit_compute_dtype=torch.bfloat16
+    bnb_4bit_compute_dtype=torch.bfloat16,
+    llm_int8_skip_modules=["lm_head"]  # Skip quantization for output layer
 )
 
 # LLM Manager
 class LLMManager:
-    def __init__(self, model_name: str, device: str = "cuda" if torch.cuda.is_available() else "cpu"):
+    def __init__(self, model_name: str):
         self.model_name = model_name
-        self.device = torch.device(device)
-        self.torch_dtype = torch.bfloat16 if self.device.type != "cpu" else torch.float32
+        self.device = torch.device("cuda:0")
+        self.torch_dtype = torch.bfloat16
         self.model = None
         self.processor = None
         self.is_loaded = False
-        logger.info(f"LLMManager initialized with model {model_name} on {self.device}")
+        logger.info(f"LLMManager initialized with model {model_name} on CUDA")
 
     def load(self):
         if not self.is_loaded:
@@ -95,12 +82,15 @@ class LLMManager:
                     self.model_name,
                     device_map="auto",
                     quantization_config=quantization_config,
-                    torch_dtype=self.torch_dtype
+                    torch_dtype=self.torch_dtype,
+                    attn_implementation="flash_attention_2"
                 )
+                self.model = torch.compile(self.model, mode="reduce-overhead")
                 self.model.eval()
                 self.processor = AutoProcessor.from_pretrained(self.model_name)
                 self.is_loaded = True
-                logger.info(f"LLM {self.model_name} loaded on {self.device}")
+                logger.info(f"LLM {self.model_name} loaded on CUDA")
+                logger.info(f"GPU Memory Allocated: {torch.cuda.memory_allocated() / 1024**3:.2f} GB")
             except Exception as e:
                 logger.error(f"Failed to load LLM: {str(e)}")
                 raise
@@ -109,11 +99,10 @@ class LLMManager:
         if self.is_loaded:
             del self.model
             del self.processor
-            if self.device.type == "cuda":
-                torch.cuda.empty_cache()
-                logger.info(f"GPU memory allocated after unload: {torch.cuda.memory_allocated()}")
+            torch.cuda.empty_cache()
             self.is_loaded = False
-            logger.info(f"LLM {self.model_name} unloaded from {self.device}")
+            logger.info(f"LLM {self.model_name} unloaded from CUDA")
+            logger.info(f"GPU Memory Allocated: {torch.cuda.memory_allocated() / 1024**3:.2f} GB")
 
     async def generate(self, prompt: str, max_tokens: int = 512, temperature: float = 0.7) -> str:
         if not self.is_loaded:
@@ -144,7 +133,7 @@ class LLMManager:
 
         input_len = inputs_vlm["input_ids"].shape[-1]
 
-        with torch.inference_mode():
+        with torch.no_grad(), autocast(dtype=torch.bfloat16):
             generation = self.model.generate(
                 **inputs_vlm,
                 max_new_tokens=max_tokens,
@@ -193,7 +182,7 @@ class LLMManager:
 
         input_len = inputs_vlm["input_ids"].shape[-1]
 
-        with torch.inference_mode():
+        with torch.no_grad(), autocast(dtype=torch.bfloat16):
             generation = self.model.generate(
                 **inputs_vlm,
                 max_new_tokens=512,
@@ -242,7 +231,7 @@ class LLMManager:
 
         input_len = inputs_vlm["input_ids"].shape[-1]
 
-        with torch.inference_mode():
+        with torch.no_grad(), autocast(dtype=torch.bfloat16):
             generation = self.model.generate(
                 **inputs_vlm,
                 max_new_tokens=512,
@@ -257,8 +246,8 @@ class LLMManager:
 
 # TTS Manager
 class TTSManager:
-    def __init__(self, device_type=device):
-        self.device_type = device_type
+    def __init__(self):
+        self.device = torch.device("cuda:0")
         self.model = None
         self.repo_id = "ai4bharat/IndicF5"
 
@@ -267,15 +256,20 @@ class TTSManager:
             logger.info("Loading TTS model IndicF5...")
             self.model = AutoModel.from_pretrained(
                 self.repo_id,
-                trust_remote_code=True
+                trust_remote_code=True,
+                device_map="auto",
+                torch_dtype=torch.bfloat16
             )
-            self.model = self.model.to(self.device_type)
-            logger.info("TTS model IndicF5 loaded")
+            self.model = torch.compile(self.model, mode="reduce-overhead")
+            self.model = self.model.to(self.device)
+            logger.info("TTS model IndicF5 loaded on CUDA")
+            logger.info(f"GPU Memory Allocated: {torch.cuda.memory_allocated() / 1024**3:.2f} GB")
 
     def synthesize(self, text, ref_audio_path, ref_text):
         if not self.model:
             raise ValueError("TTS model not loaded")
-        return self.model(text, ref_audio_path=ref_audio_path, ref_text=ref_text)
+        with torch.no_grad(), autocast(dtype=torch.bfloat16):
+            return self.model(text, ref_audio_path=ref_audio_path, ref_text=ref_text)
 
 # TTS Constants
 EXAMPLES = [
@@ -346,8 +340,8 @@ SUPPORTED_LANGUAGES = {
 
 # Translation Manager
 class TranslateManager:
-    def __init__(self, src_lang, tgt_lang, device_type=device, use_distilled=True):
-        self.device_type = device_type
+    def __init__(self, src_lang, tgt_lang, use_distilled=True):
+        self.device = torch.device("cuda:0")
         self.tokenizer = None
         self.model = None
         self.src_lang = src_lang
@@ -372,26 +366,29 @@ class TranslateManager:
             self.model = AutoModelForSeq2SeqLM.from_pretrained(
                 model_name,
                 trust_remote_code=True,
-                torch_dtype=torch.float16,
+                device_map="auto",
+                torch_dtype=torch.bfloat16,
                 attn_implementation="flash_attention_2"
             )
-            self.model = self.model.to(self.device_type)
             self.model = torch.compile(self.model, mode="reduce-overhead")
-            logger.info(f"Translation model {model_name} loaded")
+            self.model = self.model.to(self.device)
+            logger.info(f"Translation model {model_name} loaded on CUDA")
+            logger.info(f"GPU Memory Allocated: {torch.cuda.memory_allocated() / 1024**3:.2f} GB")
 
+# Model Manager
 class ModelManager:
-    def __init__(self, device_type=device, use_distilled=True, is_lazy_loading=False):
+    def __init__(self, use_distilled=True, is_lazy_loading=False):
         self.models = {}
-        self.device_type = device_type
+        self.device = torch.device("cuda:0")
         self.use_distilled = use_distilled
         self.is_lazy_loading = is_lazy_loading
 
     def load_model(self, src_lang, tgt_lang, key):
         logger.info(f"Loading translation model for {src_lang} -> {tgt_lang}")
-        translate_manager = TranslateManager(src_lang, tgt_lang, self.device_type, self.use_distilled)
+        translate_manager = TranslateManager(src_lang, tgt_lang, self.use_distilled)
         translate_manager.load()
         self.models[key] = translate_manager
-        logger.info(f"Loaded translation model for {key}")
+        logger.info(f"Loaded translation model for {key} on CUDA")
 
     def get_model(self, src_lang, tgt_lang):
         key = self._get_model_key(src_lang, tgt_lang)
@@ -413,8 +410,8 @@ class ModelManager:
 
 # ASR Manager
 class ASRModelManager:
-    def __init__(self, device_type="cuda"):
-        self.device_type = device_type
+    def __init__(self):
+        self.device = torch.device("cuda:0")
         self.model = None
         self.model_language = {"kannada": "kn"}
 
@@ -423,10 +420,14 @@ class ASRModelManager:
             logger.info("Loading ASR model...")
             self.model = AutoModel.from_pretrained(
                 "ai4bharat/indic-conformer-600m-multilingual",
-                trust_remote_code=True
+                trust_remote_code=True,
+                device_map="auto",
+                torch_dtype=torch.bfloat16
             )
-            self.model = self.model.to(self.device_type)
-            logger.info("ASR model loaded")
+            self.model = torch.compile(self.model, mode="reduce-overhead")
+            self.model = self.model.to(self.device)
+            logger.info("ASR model loaded on CUDA")
+            logger.info(f"GPU Memory Allocated: {torch.cuda.memory_allocated() / 1024**3:.2f} GB")
 
 # Global Managers
 llm_manager = LLMManager(settings.llm_model_name)
@@ -453,7 +454,6 @@ class ChatRequest(BaseModel):
             raise ValueError(f"Unsupported language code: {v}. Supported codes: {', '.join(SUPPORTED_LANGUAGES)}")
         return v
 
-
 class ChatResponse(BaseModel):
     response: str
 
@@ -477,24 +477,20 @@ translation_configs = []
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    def load_all_models():
+    async def load_all_models():
         try:
-            # Load LLM model
             logger.info("Loading LLM model...")
             llm_manager.load()
             logger.info("LLM model loaded successfully")
 
-            # Load TTS model
             logger.info("Loading TTS model...")
             tts_manager.load()
             logger.info("TTS model loaded successfully")
 
-            # Load ASR model
             logger.info("Loading ASR model...")
             asr_manager.load()
             logger.info("ASR model loaded successfully")
 
-            # Load translation models
             translation_tasks = [
                 ('eng_Latn', 'kan_Knda', 'eng_indic'),
                 ('kan_Knda', 'eng_Latn', 'indic_eng'),
@@ -518,9 +514,10 @@ async def lifespan(app: FastAPI):
             raise
 
     logger.info("Starting sequential model loading...")
-    load_all_models()
+    await load_all_models()
     yield
     llm_manager.unload()
+    torch.cuda.empty_cache()
     logger.info("Server shutdown complete")
 
 # FastAPI App
@@ -593,9 +590,9 @@ async def translate(request: TranslationRequest, translate_manager: TranslateMan
         padding="longest",
         return_tensors="pt",
         return_attention_mask=True,
-    ).to(translate_manager.device_type)
+    ).to(translate_manager.device, dtype=torch.bfloat16)
 
-    with torch.no_grad():
+    with torch.no_grad(), autocast(dtype=torch.bfloat16):
         generated_tokens = translate_manager.model.generate(
             **inputs,
             use_cache=True,
@@ -850,12 +847,13 @@ async def transcribe_audio(file: UploadFile = File(...), language: str = Query(.
         raise HTTPException(status_code=503, detail="ASR model not loaded")
     try:
         wav, sr = torchaudio.load(file.file)
-        wav = torch.mean(wav, dim=0, keepdim=True)
+        wav = torch.mean(wav, dim=0, keepdim=True).to(device, dtype=torch.bfloat16)
         target_sample_rate = 16000
         if sr != target_sample_rate:
-            resampler = torchaudio.transforms.Resample(orig_freq=sr, new_freq=target_sample_rate)
+            resampler = torchaudio.transforms.Resample(orig_freq=sr, new_freq=target_sample_rate).to(device)
             wav = resampler(wav)
-        transcription_rnnt = asr_manager.model(wav, asr_manager.model_language[language], "rnnt")
+        with torch.no_grad(), autocast(dtype=torch.bfloat16):
+            transcription_rnnt = asr_manager.model(wav, asr_manager.model_language[language], "rnnt")
         return TranscriptionResponse(text=transcription_rnnt)
     except Exception as e:
         logger.error(f"Error in transcription: {str(e)}")
@@ -926,4 +924,4 @@ if __name__ == "__main__":
     host = args.host if args.host != settings.host else settings.host
     port = args.port if args.port != settings.port else settings.port
 
-    uvicorn.run(app, host=host, port=port)
+    uvicorn.run(app, host=host, port=port, workers=1)  # Increase workers for CUDA
