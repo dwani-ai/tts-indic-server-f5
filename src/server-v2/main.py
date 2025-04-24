@@ -1,73 +1,128 @@
-import argparse
-import json
-from fastapi import FastAPI
+# main.py
+import io
+import tempfile
 import uvicorn
-from settings import Settings
-from managers.llm_manager import LLMManager
-from managers.tts_manager import TTSManager
-from managers.asr_manager import ASRModelManager
-from managers.translate_manager import ModelManager
+from fastapi import FastAPI, Request, Depends
+from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+import soundfile as sf
+import torchaudio
+from time import time
+from contextlib import asynccontextmanager
+from typing import List
 from logging_config import logger
-from api.endpoints import app, set_global_managers, translation_configs, load_all_models
+from tts_config import SPEED, ResponseFormat, config as tts_config
 
+# Import extracted modules
+from config.settings import parse_arguments
+from config.constants import SUPPORTED_LANGUAGES, EXAMPLES, LANGUAGE_TO_SCRIPT, QUANTIZATION_CONFIG
+from utils.audio_utils import load_audio_from_url
+from models.schemas import (
+    ChatRequest, ChatResponse, TranslationRequest, TranslationResponse,
+    TranscriptionResponse, SynthesizeRequest, KannadaSynthesizeRequest
+)
+from core.managers import registry, initialize_managers
+from routes.chat import router as chat_router
+from routes.translate import router as translate_router_v0, router_v1 as translate_router_v1
+from routes.speech import router as speech_router
+from routes.health import router as health_router
+
+# Parse arguments early
+args = parse_arguments()
+
+# Lifespan Event Handler
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    def load_all_models():
+        try:
+            # Load LLM model
+            logger.info("Loading LLM model...")
+            registry.llm_manager.load()
+            logger.info("LLM model loaded successfully")
+
+            # Load TTS model
+            logger.info("Loading TTS model...")
+            registry.tts_manager.load()
+            logger.info("TTS model loaded successfully")
+
+            # Load ASR model
+            logger.info("Loading ASR model...")
+            registry.asr_manager.load()
+            logger.info("ASR model loaded successfully")
+
+            # Load translation models
+            translation_tasks = [
+                ('eng_Latn', 'kan_Knda', 'eng_indic'),
+                ('kan_Knda', 'eng_Latn', 'indic_eng'),
+                ('kan_Knda', 'hin_Deva', 'indic_indic'),
+            ]
+            
+            for config in registry.translation_configs:
+                src_lang = config["src_lang"]
+                tgt_lang = config["tgt_lang"]
+                key = registry.model_manager._get_model_key(src_lang, tgt_lang)
+                translation_tasks.append((src_lang, tgt_lang, key))
+
+            for src_lang, tgt_lang, key in translation_tasks:
+                logger.info(f"Loading translation model for {src_lang} -> {tgt_lang}...")
+                registry.model_manager.load_model(src_lang, tgt_lang, key)
+                logger.info(f"Translation model for {key} loaded successfully")
+
+            logger.info("All models loaded successfully")
+        except Exception as e:
+            logger.error(f"Error loading models: {str(e)}")
+            raise
+
+    logger.info("Initializing managers...")
+    initialize_managers(args.config, args)
+    logger.info("Starting sequential model loading...")
+    load_all_models()
+    yield
+    registry.llm_manager.unload()
+    logger.info("Server shutdown complete")
+
+# FastAPI App
+app = FastAPI(
+    title="Dhwani API",
+    description="AI Chat API supporting Indian languages",
+    version="1.0.0",
+    redirect_slashes=False,
+    lifespan=lifespan
+)
+
+# Add CORS Middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Add Timing Middleware
+@app.middleware("http")
+async def add_request_timing(request: Request, call_next):
+    start_time = time()
+    response = await call_next(request)
+    end_time = time()
+    duration = end_time - start_time
+    logger.info(f"Request to {request.url.path} took {duration:.3f} seconds")
+    response.headers["X-Response-Time"] = f"{duration:.3f}"
+    return response
+
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+
+# Mount Routers
+app.include_router(chat_router)
+app.include_router(translate_router_v0)
+app.include_router(translate_router_v1)
+app.include_router(speech_router)
+app.include_router(health_router)
+
+# Main Execution
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run the FastAPI server.")
-    parser.add_argument("--port", type=int, default=7860, help="Port to run the server on.")
-    parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to run the server on.")
-    parser.add_argument("--config", type=str, default="config_one", help="Configuration to use")
-    args = parser.parse_args()
-
-    def load_config(config_path="dhwani_config.json"):
-        with open(config_path, "r") as f:
-            return json.load(f)
-
-    config_data = load_config()
-    if args.config not in config_data["configs"]:
-        raise ValueError(f"Invalid config: {args.config}. Available: {list(config_data['configs'].keys())}")
-
-    selected_config = config_data["configs"][args.config]
-    global_settings = config_data["global_settings"]
-
-    settings = Settings()
-    settings.llm_model_name = selected_config["components"]["LLM"]["model"]
-    settings.max_tokens = selected_config["components"]["LLM"]["max_tokens"]
-    settings.host = global_settings["host"]
-    settings.port = global_settings["port"]
-    settings.chat_rate_limit = global_settings["chat_rate_limit"]
-    settings.speech_rate_limit = global_settings["speech_rate_limit"]
-
-    # Initialize global managers
-    logger.info("Initializing global managers...")
-    llm_manager = LLMManager(settings.llm_model_name)
-    model_manager = ModelManager(is_lazy_loading=False)  # Disable lazy loading
-    asr_manager = ASRModelManager()
-    tts_manager = TTSManager()
-
-    # Set global managers in endpoints
-    logger.info("Setting global managers...")
-    set_global_managers(llm_manager, tts_manager, asr_manager, model_manager)
-
-    # Load translation configs
-    if selected_config["components"]["Translation"]:
-        logger.info("Loading translation configurations...")
-        translation_configs.extend(selected_config["components"]["Translation"])
-
-    # Update ASR language if provided
-    if selected_config["components"]["ASR"]:
-        logger.info(f"Updating ASR language: {selected_config['language']}")
-        asr_manager.model_language[selected_config["language"]] = selected_config["components"]["ASR"]["language_code"]
-
-    # Explicitly load all models before starting the server
-    logger.info("Explicitly loading all models before server startup...")
-    try:
-        load_all_models()
-        logger.info("All models loaded successfully before server startup")
-    except Exception as e:
-        logger.error(f"Failed to load models before server startup: {str(e)}")
-        raise
-
-    host = args.host if args.host != settings.host else settings.host
-    port = args.port if args.port != settings.port else settings.port
-
-    logger.info(f"Starting FastAPI server on {host}:{port}...")
+    host = args.host
+    port = args.port
     uvicorn.run(app, host=host, port=port)
