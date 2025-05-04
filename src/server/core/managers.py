@@ -155,7 +155,7 @@ class LLMManager:
             generation = generation[0][input_len:]
 
         response = self.processor.decode(generation, skip_special_tokens=True)
-        logger.info(f"Generated response: {response}")
+        logger.debug(f"Generated response: {response}")
         return response
 
     async def vision_query(self, image: Image.Image, query: str) -> str:
@@ -165,7 +165,7 @@ class LLMManager:
         messages_vlm = [
             {
                 "role": "system",
-                "content": [{"type": "text", "text": "You are Dhwani, a helpful assistant. Summarize your answer in maximum 1 sentence."}]
+                "content": [{"type": "text", "text": "You are Dhwani, a helpful assistant. Summarize your answer in maximum 1 sentence. If the answer contains numerical digits, convert the digits into words"}]
             },
             {
                 "role": "user",
@@ -176,9 +176,9 @@ class LLMManager:
         messages_vlm[1]["content"].append({"type": "text", "text": query})
         if image and image.size[0] > 0 and image.size[1] > 0:
             messages_vlm[1]["content"].insert(0, {"type": "image", "image": image})
-            logger.info(f"Received valid image for processing")
+            logger.debug(f"Received valid image for processing")
         else:
-            logger.info("No valid image provided, processing text only")
+            logger.debug("No valid image provided, processing text only")
 
         try:
             inputs_vlm = self.processor.apply_chat_template(
@@ -204,7 +204,7 @@ class LLMManager:
             generation = generation[0][input_len:]
 
         decoded = self.processor.decode(generation, skip_special_tokens=True)
-        logger.info(f"Vision query response: {decoded}")
+        logger.debug(f"Vision query response: {decoded}")
         return decoded
 
     async def document_query(self, image: Image.Image, query: str) -> str:
@@ -225,9 +225,9 @@ class LLMManager:
         messages_vlm[1]["content"].append({"type": "text", "text": query})
         if image and image.size[0] > 0 and image.size[1] > 0:
             messages_vlm[1]["content"].insert(0, {"type": "image", "image": image})
-            logger.info(f"Received valid image for processing")
+            logger.debug(f"Received valid image for processing")
         else:
-            logger.info("No valid image provided, processing text only")
+            logger.debug("No valid image provided, processing text only")
 
         try:
             inputs_vlm = self.processor.apply_chat_template(
@@ -253,7 +253,7 @@ class LLMManager:
             generation = generation[0][input_len:]
 
         decoded = self.processor.decode(generation, skip_special_tokens=True)
-        logger.info(f"Vision query response: {decoded}")
+        logger.debug(f"Vision query response: {decoded}")
         return decoded
     
     async def document_query_batch_old(self, batch_items: List[Dict[str, Any]]) -> List[str]:
@@ -300,9 +300,9 @@ class LLMManager:
             messages_vlm[1]["content"].append({"type": "text", "text": query})
             if image:
                 messages_vlm[1]["content"].insert(0, {"type": "image", "image": image})
-                logger.info(f"Received valid image for processing in batch")
+                logger.debug(f"Received valid image for processing in batch")
             else:
-                logger.info("No valid image provided, processing text only in batch")
+                logger.debug("No valid image provided, processing text only in batch")
 
             try:
                 # Apply chat template and prepare inputs
@@ -338,7 +338,7 @@ class LLMManager:
             # Decode the output
             try:
                 decoded = self.processor.decode(generation, skip_special_tokens=True)
-                logger.info(f"Batch vision query response: {decoded}")
+                logger.debug(f"Batch vision query response: {decoded}")
                 results.append(decoded)
             except Exception as e:
                 logger.error(f"Error in decoding for query '{query}': {str(e)}")
@@ -387,11 +387,11 @@ class LLMManager:
             valid_page_numbers.append(page_number)
 
         if not valid_queries:
-            logger.info("No valid items to process in batch")
+            logger.debug("No valid items to process in batch")
             return results
 
         # Log input summary
-        logger.info(f"Processing {len(valid_queries)} valid items for pages {[pn for pn in valid_page_numbers]}")
+        logger.debug(f"Processing {len(valid_queries)} valid items for pages {[pn for pn in valid_page_numbers]}")
 
         # Prepare batched messages
         messages_vlm_batch = []
@@ -457,7 +457,7 @@ class LLMManager:
                         output = gen[input_len:]
                         decoded = self.processor.decode(output, skip_special_tokens=True)
                         results[idx] = decoded
-                        logger.info(f"Generated response for page {page_number}: {decoded[:100]}...")
+                        logger.debug(f"Generated response for page {page_number}: {decoded[:100]}...")
                     except Exception as e:
                         logger.error(f"Error in decoding for page {page_number}: {str(e)}")
                         results[idx] = ""
@@ -495,7 +495,7 @@ class LLMManager:
                             output = generation[0][input_len:]
                             decoded = self.processor.decode(output, skip_special_tokens=True)
                             results[idx] = decoded
-                            logger.info(f"Generated response for page {page_number} (sequential): {decoded[:100]}...")
+                            logger.debug(f"Generated response for page {page_number} (sequential): {decoded[:100]}...")
                     except Exception as e:
                         logger.error(f"Error in sequential processing for page {page_number}: {str(e)}")
                         results[idx] = ""
@@ -550,11 +550,11 @@ class LLMManager:
             valid_page_numbers.append(page_number)
 
         if not valid_queries:
-            logger.info("No valid items to process in batch")
+            logger.debug("No valid items to process in batch")
             return results
 
         # Log input summary
-        logger.info(f"Processing {len(valid_queries)} valid items for pages {[pn for pn in valid_page_numbers]}")
+        logger.debug(f"Processing {len(valid_queries)} valid items for pages {[pn for pn in valid_page_numbers]}")
 
         # Prepare batched messages
         messages_vlm_batch = []
@@ -599,7 +599,7 @@ class LLMManager:
 
             with profiler:
                 try:
-                    logger.info(f"Attempting batch processing for sub-batch {start_idx}-{end_idx} (pages {[pn for pn in batch_page_numbers]})")
+                    logger.debug(f"Attempting batch processing for sub-batch {start_idx}-{end_idx} (pages {[pn for pn in batch_page_numbers]})")
                     start_time = time.time()
 
                     # Run batch processing with timeout
@@ -614,7 +614,7 @@ class LLMManager:
                         raise RuntimeError("Preprocessing timeout")
 
                     preprocess_time = time.time() - start_time
-                    logger.info(f"Preprocessing took {preprocess_time:.3f}s for sub-batch {start_idx}-{end_idx}")
+                    logger.debug(f"Preprocessing took {preprocess_time:.3f}s for sub-batch {start_idx}-{end_idx}")
 
                     # Move tensors to device with appropriate dtypes
                     for k in inputs_vlm:
@@ -637,7 +637,7 @@ class LLMManager:
                             temperature=0.7
                         )
                     generate_time = time.time() - start_time
-                    logger.info(f"Generation took {generate_time:.3f}s for sub-batch {start_idx}-{end_idx}")
+                    logger.debug(f"Generation took {generate_time:.3f}s for sub-batch {start_idx}-{end_idx}")
 
                     # Decode outputs
                     for i, (gen, input_len, idx, page_number) in enumerate(zip(generations, input_lens, batch_indices, batch_page_numbers)):
@@ -645,7 +645,7 @@ class LLMManager:
                             output = gen[input_len:]
                             decoded = self.processor.decode(output, skip_special_tokens=True)
                             results[idx] = decoded
-                            logger.info(f"Generated response for page {page_number}: {decoded[:100]}...")
+                            logger.debug(f"Generated response for page {page_number}: {decoded[:100]}...")
                         except Exception as e:
                             logger.error(f"Error in decoding for page {page_number}: {str(e)}")
                             results[idx] = ""
@@ -654,7 +654,7 @@ class LLMManager:
                     # Sequential fallback
                     for i, (messages, idx, page_number) in enumerate(zip(batch_messages, batch_indices, batch_page_numbers)):
                         try:
-                            logger.info(f"Attempting sequential processing for page {page_number}")
+                            logger.debug(f"Attempting sequential processing for page {page_number}")
                             start_time = time.time()
                             inputs_vlm = await asyncio.wait_for(
                                 asyncio.to_thread(self.processor.apply_chat_template, [messages],
@@ -662,7 +662,7 @@ class LLMManager:
                                 timeout=batch_timeout
                             )
                             preprocess_time = time.time() - start_time
-                            logger.info(f"Sequential preprocessing took {preprocess_time:.3f}s for page {page_number}")
+                            logger.debug(f"Sequential preprocessing took {preprocess_time:.3f}s for page {page_number}")
 
                             # Move tensors to device with appropriate dtypes
                             for k in inputs_vlm:
@@ -683,19 +683,19 @@ class LLMManager:
                                     temperature=0.7
                                 )
                             generate_time = time.time() - start_time
-                            logger.info(f"Sequential generation took {generate_time:.3f}s for page {page_number}")
+                            logger.debug(f"Sequential generation took {generate_time:.3f}s for page {page_number}")
 
                             output = generation[0][input_len:]
                             decoded = self.processor.decode(output, skip_special_tokens=True)
                             results[idx] = decoded
-                            logger.info(f"Generated response for page {page_number} (sequential): {decoded[:100]}...")
+                            logger.debug(f"Generated response for page {page_number} (sequential): {decoded[:100]}...")
                         except Exception as e:
                             logger.error(f"Error in sequential processing for page {page_number}: {str(e)}")
                             results[idx] = ""
 
             # Handle profiler output safely
             if profiler is not nullcontext() and hasattr(profiler, "key_averages"):
-                logger.info(f"Profiling results: {profiler.key_averages().table(sort_by='cuda_time_total', row_limit=10)}")
+                logger.debug(f"Profiling results: {profiler.key_averages().table(sort_by='cuda_time_total', row_limit=10)}")
 
         return results
     
@@ -885,4 +885,15 @@ def initialize_managers(config_name: str, args):
         registry.asr_manager.model_language[selected_config["language"]] = selected_config["components"]["ASR"]["language_code"]
 
     if selected_config["components"]["Translation"]:
-        registry.translation_configs.extend(selected_config["components"]["Translation"])
+            # Store translation configurations
+            registry.translation_configs.extend(selected_config["components"]["Translation"])
+            # Initialize translation models for all supported language pairs
+            for translation_config in selected_config["components"]["Translation"]:
+                src_lang = translation_config.get("src_lang")
+                tgt_lang = translation_config.get("tgt_lang")
+                try:
+                    # Load or register model for the language pair
+                    registry.model_manager.get_model(src_lang, tgt_lang)
+                    logger.info(f"Registered translation model for {src_lang} -> {tgt_lang}")
+                except ValueError as e:
+                    logger.error(f"Failed to register translation model for {src_lang} -> {tgt_lang}: {str(e)}")

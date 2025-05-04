@@ -25,7 +25,7 @@ async def chat(
 ):
     if not chat_request.prompt:
         raise HTTPException(status_code=400, detail="Prompt cannot be empty")
-    logger.info(f"Received prompt: {chat_request.prompt}, src_lang: {chat_request.src_lang}, tgt_lang: {chat_request.tgt_lang}")
+    logger.debug(f"Received prompt: {chat_request.prompt}, src_lang: {chat_request.src_lang}, tgt_lang: {chat_request.tgt_lang}")
     
     try:
         if chat_request.src_lang != "eng_Latn" :# and chat_request.src_lang not in EUROPEAN_LANGUAGES:
@@ -36,13 +36,13 @@ async def chat(
                 model_manager=model_manager
             )
             prompt_to_process = translated_prompt[0]
-            logger.info(f"Translated prompt to English: {prompt_to_process}")
+            logger.debug(f"Translated prompt to English: {prompt_to_process}")
         else:
             prompt_to_process = chat_request.prompt
-            logger.info("Prompt in English or European language, no translation needed")
+            logger.debug("Prompt in English or European language, no translation needed")
 
         response = await llm_manager.generate(prompt_to_process, settings.max_tokens)
-        logger.info(f"Generated response: {response}")
+        logger.debug(f"Generated response: {response}")
 
         if chat_request.tgt_lang != "eng_Latn" :# and chat_request.tgt_lang not in EUROPEAN_LANGUAGES:
             translated_response = await perform_internal_translation(
@@ -52,10 +52,10 @@ async def chat(
                 model_manager=model_manager
             )
             final_response = translated_response[0]
-            logger.info(f"Translated response to {chat_request.tgt_lang}: {final_response}")
+            logger.debug(f"Translated response to {chat_request.tgt_lang}: {final_response}")
         else:
             final_response = response
-            logger.info(f"Response in {chat_request.tgt_lang}, no translation needed")
+            logger.debug(f"Response in {chat_request.tgt_lang}, no translation needed")
 
         return ChatResponse(response=final_response)
     except Exception as e:
@@ -84,13 +84,13 @@ async def visual_query(
                 model_manager=model_manager
             )
             query_to_process = translated_query[0]
-            logger.info(f"Translated query to English: {query_to_process}")
+            logger.debug(f"Translated query to English: {query_to_process}")
         else:
             query_to_process = query
-            logger.info("Query already in English, no translation needed")
+            logger.debug("Query already in English, no translation needed")
 
         answer = await llm_manager.vision_query(image, query_to_process)
-        logger.info(f"Generated English answer: {answer}")
+        logger.debug(f"Generated English answer: {answer}")
 
         if tgt_lang != "eng_Latn":
             translated_answer = await perform_internal_translation(
@@ -100,10 +100,10 @@ async def visual_query(
                 model_manager=model_manager
             )
             final_answer = translated_answer[0]
-            logger.info(f"Translated answer to {tgt_lang}: {final_answer}")
+            logger.debug(f"Translated answer to {tgt_lang}: {final_answer}")
         else:
             final_answer = answer
-            logger.info("Answer kept in English, no translation needed")
+            logger.debug("Answer kept in English, no translation needed")
 
         return {"answer": final_answer}
     except Exception as e:
@@ -132,13 +132,13 @@ async def document_query(
                 model_manager=model_manager
             )
             query_to_process = translated_query[0]
-            logger.info(f"Translated query to English: {query_to_process}")
+            logger.debug(f"Translated query to English: {query_to_process}")
         else:
             query_to_process = query
-            logger.info("Query already in English, no translation needed")
+            logger.debug("Query already in English, no translation needed")
 
         answer = await llm_manager.document_query(image, query_to_process)
-        logger.info(f"Generated English answer: {answer}")
+        logger.debug(f"Generated English answer: {answer}")
 
         if tgt_lang != "eng_Latn":
             translated_answer = await perform_internal_translation(
@@ -148,10 +148,10 @@ async def document_query(
                 model_manager=model_manager
             )
             final_answer = translated_answer[0]
-            logger.info(f"Translated answer to {tgt_lang}: {final_answer}")
+            logger.debug(f"Translated answer to {tgt_lang}: {final_answer}")
         else:
             final_answer = answer
-            logger.info("Answer kept in English, no translation needed")
+            logger.debug("Answer kept in English, no translation needed")
 
         return {"answer": final_answer}
     except Exception as e:
@@ -175,62 +175,13 @@ async def visual_completion(
         img = Image.open(io.BytesIO(image_data))
         
         answer = await llm_manager.vision_completion(img, prompt, max_tokens, temperature)
-        logger.info(f"Generated English answer: {answer}")
+        logger.debug(f"Generated English answer: {answer}")
 
         return {"answer": answer}
     except Exception as e:
         logger.error(f"Error processing request: {str(e)}")
         raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
-'''    
-from typing import List   
 
-class MessageContentItem(BaseModel):
-    type: str
-    text: str = None
-    image: str = None
-
-class Message(BaseModel):
-    role: str
-    content: List[MessageContentItem]
-
-class ChatCompletionRequest(BaseModel):
-    model: str = "gemma3-4b-it"
-    messages: List[Message]
-    temperature: float = 0.7
-    max_tokens: int = 200
-
-@router.post("/chat/completions")
-async def chat_completion(request: ChatCompletionRequest,llm_manager=Depends(get_llm_manager)):
-    try:
-        # Convert messages to processor format
-        hf_messages = []
-        for msg in request.messages:
-            content_items = []
-            for item in msg.content:
-                if item.type == "text":
-                    content_items.append({"type": "text", "text": item.text})
-                elif item.type == "image":
-                    content_items.append({"type": "image", "image": item.image})
-            hf_messages.append({"role": msg.role, "content": content_items})
-
-
-        response = await llm_manager.generate(request.messages, request.max_tokens)
-        logger.info(f"Generated response: {response}")
-
-        return {
-            "object": "chat.completion",
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": response
-                }
-            }]
-        }   
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    
-'''
 from typing import List   
 import base64
 class MessageContentItem(BaseModel):
@@ -249,79 +200,6 @@ class ChatCompletionRequest(BaseModel):
     temperature: float = 0.7
     max_tokens: int = 200
 
-@router.post("/chat/completions")
-async def chat_completion(request: ChatCompletionRequest, llm_manager=Depends(get_llm_manager)):
-    try:
-        # Check if the request contains image content
-        has_image = any(
-            item.type == "image" and (item.image or item.image_file)
-            for msg in request.messages
-            for item in msg.content
-        )
-
-        # Convert messages to processor format
-        hf_messages = []
-        for msg in request.messages:
-            content_items = []
-            for item in msg.content:
-                if item.type == "text" and item.text:
-                    content_items.append({"type": "text", "text": item.text})
-                elif item.type == "image":
-                    if item.image_file:
-                        # Handle uploaded image file
-                        if not item.image_file.content_type.startswith('image/'):
-                            raise HTTPException(status_code=400, detail="File must be an image")
-                        image_data = await item.image_file.read()
-                        img = Image.open(io.BytesIO(image_data))
-                        content_items.append({"type": "image", "image": img})
-                    elif item.image:
-                        # Handle base64-encoded image or URL
-                        try:
-                            if item.image.startswith("data:image"):
-                                # Decode base64 image
-                                base64_string = item.image.split(",")[1]
-                                image_data = base64.b64decode(base64_string)
-                                img = Image.open(io.BytesIO(image_data))
-                                content_items.append({"type": "image", "image": img})
-                            else:
-                                # Assume image is a URL (handle via llm_manager if supported)
-                                content_items.append({"type": "image", "image": item.image})
-                        except Exception as e:
-                            raise HTTPException(status_code=400, detail=f"Invalid image data: {str(e)}")
-                    else:
-                        raise HTTPException(status_code=400, detail="Image data missing")
-                else:
-                    raise HTTPException(status_code=400, detail=f"Invalid content item type: {item.type}")
-            hf_messages.append({"role": msg.role, "content": content_items})
-
-        # Choose processing method based on content
-        if has_image:
-            # Use VLM processing (assumes llm_manager.vision_completion supports mixed content)
-            response = await llm_manager.vision_completion(
-                images=[item["image"] for msg in hf_messages for item in msg["content"] if item["type"] == "image"],
-                prompt="".join(item["text"] for msg in hf_messages for item in msg["content"] if item["type"] == "text"),
-                max_tokens=request.max_tokens,
-                temperature=request.temperature
-            )
-        else:
-            # Use text-only processing
-            response = await llm_manager.generate(hf_messages, request.max_tokens)
-
-        logger.info(f"Generated response: {response}")
-
-        return {
-            "object": "chat.completion",
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": response
-                }
-            }]
-        }
-
-    except Exception as e:
-        logger.error(f"Error processing request: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 from typing import List
@@ -392,10 +270,10 @@ async def document_query_batch(
                 model_manager=model_manager
             )
             queries_to_process = translated_queries
-            logger.info(f"Translated queries to English: {translated_queries}")
+            logger.debug(f"Translated queries to English: {translated_queries}")
         else:
             queries_to_process = [item.query for item in request.images]
-            logger.info("Queries already in English, no translation needed")
+            logger.debug("Queries already in English, no translation needed")
 
         # Decode base64 images and prepare batch items
         batch_items = []
@@ -412,7 +290,7 @@ async def document_query_batch(
 
         # Process batch with LLMManager
         results = await llm_manager.document_query_batch(batch_items)
-        logger.info(f"Generated English results: {results}")
+        logger.debug(f"Generated English results: {results}")
 
         # Translate results to target language if tgt_lang is not eng_Latn
         if request.tgt_lang != "eng_Latn":
@@ -430,12 +308,121 @@ async def document_query_batch(
                 final_results = [""] * len(results)
                 for idx, translated_text in zip(non_empty_indices, translated_results):
                     final_results[idx] = translated_text
-                logger.info(f"Translated results to {request.tgt_lang}: {final_results}")
+                logger.debug(f"Translated results to {request.tgt_lang}: {final_results}")
             else:
                 final_results = results  # All results are empty, no translation needed
         else:
             final_results = results
-            logger.info("Results kept in English, no translation needed")
+            logger.debug("Results kept in English, no translation needed")
+
+        # Construct response with page numbers
+        response_results = [
+            {
+                "page_number": item["page_number"],
+                "page_text": final_results[idx]
+            }
+            for idx, item in enumerate(batch_items)
+        ]
+
+        return {"results": response_results}
+
+    except Exception as e:
+        logger.error(f"Batch processing error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
+    
+@router.post("/document_query_batch_v0/")
+async def document_query_batch(
+    request: BatchQueryRequest,
+    llm_manager=Depends(get_llm_manager),
+    model_manager=Depends(get_model_manager)
+):
+    """
+    Batch process multiple images with visual queries, including page numbers in the response.
+
+    Args:
+        request: JSON payload containing:
+            - images: List of objects with base64-encoded images, queries, and page numbers
+            - src_lang: Source language code (e.g., 'eng_Latn')
+            - tgt_lang: Target language code (e.g., 'kan_Knda')
+
+    Returns:
+        dict: A dictionary containing:
+            - results: A list of dictionaries, each with:
+                - page_number: The page number (1-based indexing)
+                - page_text: The extracted text for the corresponding image/query pair
+
+    Raises:
+        HTTPException: If processing fails or input is invalid.
+
+    Example:
+        ```json
+        {
+            "results": [
+                {"page_number": 1, "page_text": "Text from image 1"},
+                {"page_number": 2, "page_text": "Text from image 2"}
+            ]
+        }
+        ```
+    """
+    try:
+        if not request.images:
+            raise HTTPException(status_code=400, detail="No images provided for batch processing")
+
+        # Translate queries to English if src_lang is not eng_Latn
+        queries_to_process = []
+        if request.src_lang != "eng_Latn":
+            queries = [item.query for item in request.images]
+            translated_queries = await perform_internal_translation(
+                sentences=queries,
+                src_lang=request.src_lang,
+                tgt_lang="eng_Latn",
+                model_manager=model_manager
+            )
+            queries_to_process = translated_queries
+            logger.debug(f"Translated queries to English: {translated_queries}")
+        else:
+            queries_to_process = [item.query for item in request.images]
+            logger.debug("Queries already in English, no translation needed")
+
+        # Decode base64 images and prepare batch items
+        batch_items = []
+        for item, query in zip(request.images, queries_to_process):
+            try:
+                image_bytes = base64.b64decode(item.image)
+                image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+                if image.size == (0, 0):
+                    raise ValueError("Image is empty or invalid")
+                batch_items.append({"image": image, "query": query, "page_number": item.page_number})
+            except Exception as e:
+                logger.error(f"Failed to decode or open image for page {item.page_number}: {str(e)}")
+                batch_items.append({"image": None, "query": query, "page_number": item.page_number})
+
+        # Process batch with LLMManager
+        results = await llm_manager.document_query_batch_old(batch_items)
+        logger.debug(f"Generated English results: {results}")
+
+        # Translate results to target language if tgt_lang is not eng_Latn
+        if request.tgt_lang != "eng_Latn":
+            # Filter out empty results to avoid translation errors
+            non_empty_results = [r for r in results if r]
+            non_empty_indices = [i for i, r in enumerate(results) if r]
+            if non_empty_results:
+                translated_results = await perform_internal_translation(
+                    sentences=non_empty_results,
+                    src_lang="eng_Latn",
+                    tgt_lang=request.tgt_lang,
+                    model_manager=model_manager
+                )
+                # Reconstruct results list with translated texts in the correct order
+                final_results = [""] * len(results)
+                for idx, translated_text in zip(non_empty_indices, translated_results):
+                    final_results[idx] = translated_text
+                logger.debug(f"Translated results to {request.tgt_lang}: {final_results}")
+            else:
+                final_results = results  # All results are empty, no translation needed
+        else:
+            final_results = results
+            logger.debug("Results kept in English, no translation needed")
 
         # Construct response with page numbers
         response_results = [
