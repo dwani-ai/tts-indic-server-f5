@@ -37,37 +37,10 @@ async def lifespan(app: FastAPI):
     def load_all_models():
         try:
             # Load LLM model
-            logger.info("Loading LLM model...")
-            registry.llm_manager.load()
-            logger.info("LLM model loaded successfully")
-
             # Load TTS model
             logger.info("Loading TTS model...")
             registry.tts_manager.load()
             logger.info("TTS model loaded successfully")
-
-            # Load ASR model
-            logger.info("Loading ASR model...")
-            registry.asr_manager.load()
-            logger.info("ASR model loaded successfully")
-
-            # Load translation models
-            translation_tasks = [
-                ('eng_Latn', 'kan_Knda', 'eng_indic'),
-                ('kan_Knda', 'eng_Latn', 'indic_eng'),
-                ('kan_Knda', 'hin_Deva', 'indic_indic'),
-            ]
-            
-            for config in registry.translation_configs:
-                src_lang = config["src_lang"]
-                tgt_lang = config["tgt_lang"]
-                key = registry.model_manager._get_model_key(src_lang, tgt_lang)
-                translation_tasks.append((src_lang, tgt_lang, key))
-
-            for src_lang, tgt_lang, key in translation_tasks:
-                logger.info(f"Loading translation model for {src_lang} -> {tgt_lang}...")
-                registry.model_manager.load_model(src_lang, tgt_lang, key)
-                logger.info(f"Translation model for {key} loaded successfully")
 
             logger.info("All models loaded successfully")
         except Exception as e:

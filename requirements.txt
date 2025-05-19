@@ -8,7 +8,6 @@ fastapi
 pydantic_settings
 slowapi
 python-multipart
-IndicTransToolkit @ git+https://github.com/VarunGumma/IndicTransToolkit.git@399b3fec93d2ee85cb998cb7a4fb7a7d83afcbcf
 packaging
 tenacity
 num2words
@@ -21,7 +20,7 @@ huggingface-hub
 openai
 torch
 packaging  # Added to resolve flash-attn dependency
-flash-attn
+#flash-attn
 
 torchaudio
 onnx==1.16.2
