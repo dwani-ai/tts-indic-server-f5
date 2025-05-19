@@ -15,7 +15,7 @@ from logging_config import logger
 
 # Import extracted modules
 from config.settings import parse_arguments
-from config.constants import SUPPORTED_LANGUAGES, LANGUAGE_TO_SCRIPT, QUANTIZATION_CONFIG
+from config.constants import SUPPORTED_LANGUAGES, LANGUAGE_TO_SCRIPT
 from utils.audio_utils import load_audio_from_url as load_audio_from_url_original
 from utils.tts_utils import load_audio_from_url, synthesize_speech, SynthesizeRequest, KannadaSynthesizeRequest, EXAMPLES
 from models.schemas import (
@@ -88,8 +88,7 @@ limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 
 # Mount Routers
-app.include_router(chat_router)
-app.include_router(translate_router)
+
 app.include_router(speech_router)
 app.include_router(health_router)
 

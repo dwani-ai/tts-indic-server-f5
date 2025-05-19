@@ -1,5 +1,5 @@
 # config/constants.py
-from transformers import BitsAndBytesConfig
+
 import torch
 
 # Supported languages for translation and chat
@@ -27,11 +27,3 @@ EXAMPLES = [
 LANGUAGE_TO_SCRIPT = {
     "kannada": "kan_Knda"
 }
-
-# Quantization configuration for LLM
-QUANTIZATION_CONFIG = BitsAndBytesConfig(
-    load_in_4bit=True,
-    bnb_4bit_quant_type="nf4",
-    bnb_4bit_use_double_quant=True,
-    bnb_4bit_compute_dtype=torch.bfloat16
-)
