@@ -91,7 +91,6 @@ def chunk_text(text, max_chars=135):
 # load vocoder
 def load_vocoder(vocoder_name="vocos", is_local=False, local_path="", device=device, hf_cache_dir=None):
     if vocoder_name == "vocos":
-        # vocoder = Vocos.from_pretrained("charactr/vocos-mel-24khz").to(device)
         if is_local:
             print(f"Load vocos from local path {local_path}")
             config_path = f"{local_path}/config.yaml"
@@ -112,7 +111,7 @@ def load_vocoder(vocoder_name="vocos", is_local=False, local_path="", device=dev
             }
             state_dict.update(encodec_parameters)
         vocoder.load_state_dict(state_dict)
-        vocoder = vocoder.eval().to(device)
+        vocoder = vocoder.eval().to_empty(device=device)  # Use to_empty for meta tensors
     elif vocoder_name == "bigvgan":
         try:
             from third_party.BigVGAN import bigvgan
@@ -126,7 +125,7 @@ def load_vocoder(vocoder_name="vocos", is_local=False, local_path="", device=dev
             vocoder = bigvgan.BigVGAN.from_pretrained(local_path, use_cuda_kernel=False)
 
         vocoder.remove_weight_norm()
-        vocoder = vocoder.eval().to(device)
+        vocoder = vocoder.eval().to_empty(device=device)  # Use to_empty for meta tensors
     return vocoder
 
 
@@ -175,13 +174,6 @@ def transcribe(ref_audio, language=None):
 def load_checkpoint(model, ckpt_path, device: str, dtype=None, use_ema=True):
     if dtype is None:
         dtype = torch.float32
-        # dtype = (
-        #     torch.float16
-        #     if "cuda" in device
-        #     and torch.cuda.get_device_properties(device).major >= 6
-        #     and not torch.cuda.get_device_name().endswith("[ZLUDA]")
-        #     else torch.float32
-        # )
     model = model.to(dtype)
 
     ckpt_type = ckpt_path.split(".")[-1]
@@ -252,7 +244,7 @@ def load_model(
             method=ode_method,
         ),
         vocab_char_map=vocab_char_map,
-    ).to(device)
+    ).to_empty(device=device)  # Changed from .to(device) to .to_empty(device=device)
 
     dtype = torch.float32 if mel_spec_type == "bigvgan" else None
     # model = load_checkpoint(model, ckpt_path, device, dtype=dtype, use_ema=use_ema)
