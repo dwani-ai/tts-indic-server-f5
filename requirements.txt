@@ -32,3 +32,15 @@ python-multipart
 hf_xet
 soundfile
 transformers
+
+matplotlib
+vocos
+torchdiffeq
+librosa
+x_transformers
+jieba
+pypinyin
+wandb
+ema_pytorch
+datasets
+numpy==1.26.4
