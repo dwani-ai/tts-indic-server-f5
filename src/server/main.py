@@ -18,13 +18,9 @@ from config.settings import parse_arguments
 from config.constants import SUPPORTED_LANGUAGES, LANGUAGE_TO_SCRIPT
 from utils.audio_utils import load_audio_from_url as load_audio_from_url_original
 from utils.tts_utils import load_audio_from_url, synthesize_speech, SynthesizeRequest, KannadaSynthesizeRequest, EXAMPLES
-from models.schemas import (
-    ChatRequest, ChatResponse, TranslationRequest, TranslationResponse,
-    TranscriptionResponse
-)
+
 from core.managers import registry, initialize_managers
-from routes.chat import router as chat_router
-from routes.translate import router as translate_router
+
 from routes.speech import router as speech_router
 from routes.health import router as health_router
 
